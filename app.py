@@ -127,7 +127,7 @@ st.markdown("""
 # ---------------------------------------------------------
 # 1. 구글 시트 웹앱 API 연동
 # ---------------------------------------------------------
-API_URL = "https://script.google.com/macros/s/AKfycbyDXnOr2itIAXJVTSNiwx61aPtzYotu6V3wiI7mtpE-kOJZJX1o57gmAi7bE4CHDPTnJw/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbyiAeunHQKBaLix8YZZCpknCNva9T8TfyHw3UVRF4Zolrmu9MOeTmMWjhLq03qjhHEMNg/exec"
 
 def normalize_time_str(val):
     val = str(val).strip()
@@ -144,7 +144,7 @@ def normalize_time_str(val):
 
 def load_records():
     try:
-        res = requests.get(API_URL, timeout=5)
+        res = requests.get(API_URL, timeout=8)
         if res.status_code == 200:
             data = res.json()
             if data:
@@ -165,27 +165,34 @@ def load_records():
 def add_record(record_dict):
     try:
         record_dict["action"] = "add"
-        res = requests.post(API_URL, json=record_dict, timeout=5)
+        res = requests.post(API_URL, json=record_dict, timeout=8)
         return res.status_code == 200
     except Exception:
         return False
 
 def update_record(record_dict):
-    """구글 시트의 기존 기록 수정"""
     try:
         record_dict["action"] = "update"
-        res = requests.post(API_URL, json=record_dict, timeout=5)
+        res = requests.post(API_URL, json=record_dict, timeout=8)
         return res.status_code == 200
     except Exception:
         return False
 
-def delete_record(unique_id):
-    if not unique_id or unique_id in ["-", "None", ""]:
-        return False
+def delete_record(row_data):
+    """고유 ID + 날짜/시간 백업 매칭으로 확실하게 삭제"""
     try:
-        payload = {"action": "delete", "created_at": str(unique_id)}
-        res = requests.post(API_URL, json=payload, timeout=5)
-        return res.status_code == 200
+        payload = {
+            "action": "delete",
+            "created_at": str(row_data.get("created_at", "")),
+            "date": str(row_data.get("date", "")),
+            "start_time": str(row_data.get("start_time", "")),
+            "type": str(row_data.get("type", ""))
+        }
+        res = requests.post(API_URL, json=payload, timeout=8)
+        if res.status_code == 200:
+            data = res.json()
+            return data.get("status") == "success"
+        return False
     except Exception:
         return False
 
@@ -287,7 +294,6 @@ tab_today, tab_input, tab_play = st.tabs(["📋 오늘 타임라인", "✏️ �
 
 df_records = load_records()
 
-# 수정 모드 세션 상태 관리
 if "editing_id" not in st.session_state:
     st.session_state.editing_id = None
 
@@ -370,7 +376,6 @@ with tab_today:
         for idx, row in day_df.iterrows():
             unique_created_at = str(row.get('created_at', '')).strip()
             
-            # 현재 항목이 수정 모드인 경우: 인라인 수정 폼 렌더링
             if st.session_state.editing_id == unique_created_at:
                 with st.container():
                     st.info(f"✏️ **[{row['type']}] 기록 수정 중**")
@@ -445,7 +450,6 @@ with tab_today:
                 st.write("---")
                 continue
 
-            # 일반 보기 모드 카드
             meta = type_meta.get(row['type'], {"icon": "📝", "badge": "type-badge-sleep"})
             start_disp = row['start_time']
             end_disp = row['end_time']
@@ -486,10 +490,10 @@ with tab_today:
                 st.write("")
                 if st.button("🗑️", key=f"btn_del_{unique_created_at}_{idx}", use_container_width=True, help="기록 삭제"):
                     with st.spinner("삭제 중..."):
-                        if delete_record(unique_created_at):
+                        if delete_record(row.to_dict()):
                             st.rerun()
                         else:
-                            st.error("삭제 실패")
+                            st.error("삭제 실패: 시트에서 항목을 찾지 못했습니다.")
     else:
         st.info(f"💡 {target_date_str}의 기록이 없습니다.")
 
