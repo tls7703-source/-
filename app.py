@@ -279,11 +279,15 @@ with tab_today:
     selected_date = st.date_input("📅 날짜 선택", value=today, label_visibility="collapsed")
     target_date_str = selected_date.strftime("%Y-%m-%d")
 
+    # 선택 날짜에 해당하는 기록 추출
+    # 1) 오늘 시작한 기록
+    # 2) 전날 밤 시작해서 오늘(target_date) 아침에 깬 밤잠 기록
     day_df = pd.DataFrame()
     if not df_records.empty:
         mask = (df_records["date"] == target_date_str) | (df_records["end_date"] == target_date_str)
         day_df = df_records[mask].copy()
 
+    # 요약 통계 집계
     sleep_cnt = len(day_df[day_df["type"] == "수면"]) if not day_df.empty else 0
     meal_cnt = len(day_df[day_df["type"] == "이유식"]) if not day_df.empty else 0
     milk_cnt = len(day_df[day_df["type"] == "모유 수유"]) if not day_df.empty else 0
@@ -311,10 +315,13 @@ with tab_today:
     """, unsafe_allow_html=True)
 
     if not day_df.empty:
+        # 시간순 정렬 로직 (전날 시작해 오늘 아침 깬 밤잠은 아침 기상 시각 위치에 배치)
         def make_sort_key(r):
-            d_str = r["date"]
+            if r["end_date"] == target_date_str and r["date"] != target_date_str:
+                # 전날 밤잠이 오늘 아침에 끝난 경우 -> 오늘 기상 시간 기준 정렬
+                return f"{target_date_str} {r['end_time']}"
             t_str = r["start_time"] if r["start_time"] != "-" else "00:00"
-            return f"{d_str} {t_str}"
+            return f"{r['date']} {t_str}"
             
         day_df["sort_key"] = day_df.apply(make_sort_key, axis=1)
         day_df = day_df.sort_values(by="sort_key", ascending=True)
@@ -335,8 +342,10 @@ with tab_today:
             
             if is_overnight:
                 if row['date'] == target_date_str:
-                    time_text = f"{start_disp} ~ 익일 {end_disp} (밤잠 🌙)"
+                    # 잠든 날 밤 타임라인에 표시될 때
+                    time_text = f"{start_disp} ~ 익일 {end_disp} 취침 (밤잠 🌙)"
                 else:
+                    # 일어난 다음 날 아침 타임라인에 표시될 때
                     time_text = f"전일 {start_disp} ~ {end_disp} 기상 (밤잠 🌙)"
             else:
                 time_text = start_disp
@@ -370,7 +379,7 @@ with tab_today:
 with tab_input:
     st.markdown("#### ✏️ 빠른 육아 기록")
     
-    # 1. 폼 외부에서 기록 유형을 먼저 선택 (유형 변경 시 체크박스 디폴트가 즉시 반응)
+    # 1. 상단 기록 유형 라디오 선택
     record_type = st.radio(
         "기록 유형 선택",
         ["수면", "이유식", "모유 수유", "소변", "대변"],
@@ -378,35 +387,38 @@ with tab_input:
         key="selected_record_type"
     )
     
-    # 수면일 때만 True, 나머지는 False로 디폴트 지정
-    default_has_end_time = (record_type == "수면")
+    is_sleep_type = (record_type == "수면")
     
     with st.form("quick_record_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             rec_date = st.date_input("시작 날짜", value=today)
-            rec_start_time = st.time_input("시작 시간", value=time(19, 0) if record_type == "수면" else datetime.now().time())
+            rec_start_time = st.time_input("시작(발생) 시간", value=time(19, 0) if is_sleep_type else datetime.now().time())
         with c2:
-            # 수면일 때만 체크박스가 기본 체크(True)되고, 이유식/모유/소변/대변은 체크 해제(False)됨
-            has_end_time = st.checkbox("종료 시간 입력", value=default_has_end_time, key=f"end_time_chk_{record_type}")
-            rec_end_time = st.time_input("종료 시간", value=time(6, 0) if record_type == "수면" else (datetime.now() + timedelta(minutes=40)).time())
+            # 수면 유형일 때만 종료시간 체크박스를 보여주고 기본 체크(True)
+            if is_sleep_type:
+                has_end_time = st.checkbox("종료 시간 입력", value=True, key="chk_sleep_end")
+                rec_end_time = st.time_input("종료 시간", value=time(6, 0))
+            else:
+                has_end_time = False
+                rec_end_time = None
 
+        # 수면 유형일 때만 다음날 넘김 체크박스를 보여주고, 기본값은 무조건 False (체크 안 됨)
         is_next_day = False
-        if record_type == "수면" and has_end_time:
-            auto_next_day = rec_start_time > rec_end_time
-            is_next_day = st.checkbox("🌙 다음 날 아침에 깸 (밤잠/날짜 넘어감)", value=auto_next_day)
+        if is_sleep_type and has_end_time:
+            is_next_day = st.checkbox("🌙 다음 날 아침에 깸 (밤잠/날짜 넘어감)", value=False, key="chk_sleep_next_day")
                 
         rec_memo = st.text_input("메모", placeholder="예: 140ml 완밥, 밤잠 푹 잘 잠 등")
         
         submitted = st.form_submit_button("기록 저장하기 ✨", type="primary", use_container_width=True)
         if submitted:
-            calc_end_date = (rec_date + timedelta(days=1)) if is_next_day else rec_date
+            calc_end_date = (rec_date + timedelta(days=1)) if (is_sleep_type and is_next_day) else rec_date
             new_entry = {
                 "date": rec_date.strftime("%Y-%m-%d"),
                 "type": record_type,
                 "start_time": rec_start_time.strftime("%H:%M"),
-                "end_time": rec_end_time.strftime("%H:%M") if has_end_time else "-",
-                "end_date": calc_end_date.strftime("%Y-%m-%d") if has_end_time else "-",
+                "end_time": rec_end_time.strftime("%H:%M") if (has_end_time and rec_end_time) else "-",
+                "end_date": calc_end_date.strftime("%Y-%m-%d") if (has_end_time and is_sleep_type) else "-",
                 "memo": rec_memo if rec_memo else "-",
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
