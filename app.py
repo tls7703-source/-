@@ -113,7 +113,7 @@ st.markdown("""
 # ---------------------------------------------------------
 # 1. 구글 시트 웹앱 API 연동
 # ---------------------------------------------------------
-API_URL = "여기에_웹앱_URL_붙여넣기"
+API_URL = "https://script.google.com/macros/s/AKfycby3sVLC2WBVKgNWTmeSnuWa7G_P04FLFPi7PEic65Sg6xRy5YSS4P9SlyF6Nvq1cNXnzw/exec"
 
 def load_records():
     """구글 시트에서 실시간 데이터 읽기"""
