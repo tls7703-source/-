@@ -127,7 +127,7 @@ st.markdown("""
 # ---------------------------------------------------------
 # 1. 구글 시트 웹앱 API 연동
 # ---------------------------------------------------------
-API_URL = "https://script.google.com/macros/s/AKfycbyiAeunHQKBaLix8YZZCpknCNva9T8TfyHw3UVRF4Zolrmu9MOeTmMWjhLq03qjhHEMNg/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbwqB2CU3DLgkm4cjjiFYKapYbi6tguirFKjcrwtNFpU7kuX3zg4qVuL2O5WK3IN8za3Rg/exec"
 
 def normalize_time_str(val):
     val = str(val).strip()
@@ -142,13 +142,23 @@ def normalize_time_str(val):
             return val
     return val
 
-def load_records():
+def fetch_data_and_profile():
+    """구글 시트에서 기록 목록과 저장된 아기 프로필 함께 불러오기"""
     try:
         res = requests.get(API_URL, timeout=8)
         if res.status_code == 200:
-            data = res.json()
-            if data:
-                df = pd.DataFrame(data)
+            res_json = res.json()
+            # 신규 Apps Script 구조 (records, profile 분리)
+            if isinstance(res_json, dict) and "records" in res_json:
+                records = res_json.get("records", [])
+                profile = res_json.get("profile", {})
+            else:
+                # 구버전 응답 대비
+                records = res_json if isinstance(res_json, list) else []
+                profile = {}
+                
+            df = pd.DataFrame(records) if records else pd.DataFrame()
+            if not df.empty:
                 for col in ["date", "type", "start_time", "end_time", "end_date", "memo", "created_at"]:
                     if col not in df.columns:
                         df[col] = "-"
@@ -157,10 +167,27 @@ def load_records():
                 df["end_time"] = df["end_time"].apply(normalize_time_str)
                 df["end_date"] = df["end_date"].astype(str).str.slice(0, 10)
                 df["created_at"] = df["created_at"].astype(str).str.strip()
-                return df
-        return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "end_date", "memo", "created_at"])
+            else:
+                df = pd.DataFrame(columns=["date", "type", "start_time", "end_time", "end_date", "memo", "created_at"])
+                
+            return df, profile
+        return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "end_date", "memo", "created_at"]), {}
     except Exception:
-        return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "end_date", "memo", "created_at"])
+        return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "end_date", "memo", "created_at"]), {}
+
+def save_profile_to_cloud(baby_name, birth_date_str, allergies_str):
+    """아기 프로필을 구글 클라우드에 영구 저장"""
+    try:
+        payload = {
+            "action": "save_profile",
+            "baby_name": baby_name,
+            "birth_date": birth_date_str,
+            "allergies": allergies_str
+        }
+        res = requests.post(API_URL, json=payload, timeout=8)
+        return res.status_code == 200
+    except Exception:
+        return False
 
 def add_record(record_dict):
     try:
@@ -179,7 +206,6 @@ def update_record(record_dict):
         return False
 
 def delete_record(row_data):
-    """고유 ID + 날짜/시간 백업 매칭으로 확실하게 삭제"""
     try:
         payload = {
             "action": "delete",
@@ -197,24 +223,49 @@ def delete_record(row_data):
         return False
 
 # ---------------------------------------------------------
-# 2. 아기 프로필 & D-day
+# 2. 클라우드 연동 아기 프로필 관리
 # ---------------------------------------------------------
-with st.expander("⚙️ 아기 프로필 설정 (생년월일 / 알레르기)", expanded=False):
-    c_b1, c_b2 = st.columns(2)
-    with c_b1:
-        birth_date = st.date_input("생년월일", value=date(2025, 12, 1), key="main_birth_date")
-    with c_b2:
-        allergies = st.text_input("알레르기 / 주의 음식", placeholder="예: 계란, 우유", key="main_allergies")
+df_records, cloud_profile = fetch_data_and_profile()
+
+# 클라우드 저장값 파싱
+saved_bdate_str = cloud_profile.get("birth_date", "2025-12-01")
+try:
+    initial_birth_date = datetime.strptime(saved_bdate_str, "%Y-%m-%d").date()
+except:
+    initial_birth_date = date(2025, 12, 1)
+
+saved_allergies = cloud_profile.get("allergies", "")
+saved_baby_name = cloud_profile.get("baby_name", "우리 아이")
+
+# 프로필 수정 및 클라우드 영구 저장 폼
+with st.expander("⚙️ 아기 프로필 설정 (클라우드 동기화 저장)", expanded=False):
+    with st.form("profile_setting_form"):
+        c_p0, c_p1 = st.columns([1, 1])
+        with c_p0:
+            input_baby_name = st.text_input("아기 이름 / 애칭", value=saved_baby_name)
+        with c_p1:
+            input_birth_date = st.date_input("생년월일", value=initial_birth_date)
+            
+        input_allergies = st.text_input("알레르기 / 주의 음식", value=saved_allergies, placeholder="예: 계란, 우유, 밀가루")
+        
+        save_p_btn = st.form_submit_button("프로필 클라우드 저장 💾", type="primary", use_container_width=True)
+        if save_p_btn:
+            with st.spinner("클라우드에 프로필 저장 중..."):
+                if save_profile_to_cloud(input_baby_name, input_birth_date.strftime("%Y-%m-%d"), input_allergies):
+                    st.success("프로필이 영구 저장되었습니다!")
+                    st.rerun()
+                else:
+                    st.error("저장 실패: 구글 시트 연결을 확인하세요.")
 
 today = date.today()
-days_passed = (today - birth_date).days
+days_passed = (today - initial_birth_date).days
 months_passed = max(0, days_passed // 30)
 
 st.markdown(f"""
 <div class="baby-profile-card">
-    <h2>🍼 우리 아이</h2>
+    <h2>🍼 {saved_baby_name}</h2>
     <p><strong>생후 {days_passed}일차</strong> ({months_passed}개월)</p>
-    {f'<p style="font-size:13px; margin-top:6px; background:rgba(0,0,0,0.12); border-radius:10px; padding:3px 8px; display:inline-block;">⚠️ 알레르기: {allergies}</p>' if allergies else ''}
+    {f'<p style="font-size:13px; margin-top:6px; background:rgba(0,0,0,0.12); border-radius:10px; padding:3px 8px; display:inline-block;">⚠️ 알레르기 주의: {saved_allergies}</p>' if saved_allergies else ''}
 </div>
 """, unsafe_allow_html=True)
 
@@ -239,7 +290,7 @@ EXTENDED_PLAY_DB = {
     (7, 9): [
         ("모방", "👏 짝짜꿍 & 잼잼 & 곤지곤지", "부모의 손동작을 따라 하며 모방 능력과 소근육 협응력을 키웁니다."),
         ("인지", "🔍 손수건 속 장난감 찾기", "물건을 손수건으로 살짝 가려 대상영속성을 익힙니다."),
-        ("대근육", "🎾 굴러가는 공 잡으러 기어가기", "배밀이나 기어가기를 유도하기 위해 좋아하는 공이나 장난감을 굴려줍니다."),
+        ("대근육", "🎾 굴러가는 공 잡으러 기어가기", "배밀이나 기어가기를 유도하기 위해 아이가 좋아하는 공이나 장난감을 굴려줍니다."),
         ("언어", "🗣️ 동물 소리 & 까꿍 대화", "엄마 아빠의 입 모양을 보여주며 음성 언어 모방을 유도합니다."),
         ("소근육", "🥣 핑거푸드(떡뻥) 집어먹기", "엄지와 검지로 작은 과자 조각을 집어먹으며 핀서 그립을 연습합니다.")
     ],
@@ -291,8 +342,6 @@ EXTENDED_PLAY_DB = {
 # 4. 탭 화면
 # ---------------------------------------------------------
 tab_today, tab_input, tab_play = st.tabs(["📋 오늘 타임라인", "✏️ 기록하기", "🧸 오늘의 추천 놀이"])
-
-df_records = load_records()
 
 if "editing_id" not in st.session_state:
     st.session_state.editing_id = None
