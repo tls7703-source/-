@@ -126,7 +126,7 @@ st.markdown("""
 # ---------------------------------------------------------
 # 1. 구글 시트 웹앱 API 연동
 # ---------------------------------------------------------
-API_URL = "여기에_웹앱_URL_붙여넣기"
+API_URL = "https://script.google.com/macros/s/AKfycbycDINlx-sKqxozyY7PiidFXcYcbAeQ7H5PQ4xUW3A0uQJ4nm7ubcMOsmyklFpAy0DS_Q/exec"
 
 def normalize_time_str(val):
     val = str(val).strip()
