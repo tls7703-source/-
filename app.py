@@ -1,31 +1,34 @@
 import streamlit as st
 import pandas as pd
+import requests
 from datetime import datetime, date, time, timedelta
-from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(page_title="우리 아이 맞춤 스케줄러 & 실시간 공유 기록장", page_icon="👶", layout="wide")
+st.set_page_config(page_title="우리 아이 맞춤 스케줄러 & 실시간 기록장", page_icon="👶", layout="wide")
 
 # ---------------------------------------------------------
-# 1. 구글 스프레드시트 연결 설정
+# 1. 구글 시트 웹앱 API 연동 (1단계에서 복사한 URL 입력)
 # ---------------------------------------------------------
-conn = st.connection("gsheets", type=GSheetsConnection)
+API_URL = "https://script.google.com/macros/s/AKfycbxZnQwbsXxAa63Wyz1XFyNYTb0n7WOA5kMZQjT_9SMVbA1_Y-qitH3VOKqq5TPWA0Pugw/exec"
 
 def load_records():
-    """구글 시트에서 데이터 읽어오기"""
+    """구글 시트에서 실시간 데이터 읽어오기"""
     try:
-        df = conn.read(ttl="0s")  # 캐시 없이 실시간 데이터 호출
-        if df is not None and not df.empty:
-            return df.dropna(how="all")
+        res = requests.get(API_URL, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            if data:
+                return pd.DataFrame(data)
         return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "memo", "created_at"])
     except Exception:
         return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "memo", "created_at"])
 
 def add_record(record_dict):
-    """새 기록을 구글 시트에 추가"""
-    current_df = load_records()
-    new_row = pd.DataFrame([record_dict])
-    updated_df = pd.concat([current_df, new_row], ignore_index=True)
-    conn.update(data=updated_df)
+    """구글 시트에 새 기록 전송"""
+    try:
+        res = requests.post(API_URL, json=record_dict, timeout=5)
+        return res.status_code == 200
+    except Exception:
+        return False
 
 # ---------------------------------------------------------
 # 2. 아기 프로필 & 패턴 설정
@@ -117,10 +120,13 @@ with col_left:
                 "memo": rec_memo,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            with st.spinner("구글 시트에 동기화 중..."):
-                add_record(new_entry)
-            st.success("구글 시트에 저장 완료!")
-            st.rerun()
+            with st.spinner("구글 시트에 저장 중..."):
+                success = add_record(new_entry)
+            if success:
+                st.success("구글 시트에 저장 완료!")
+                st.rerun()
+            else:
+                st.error("저장 중 오류가 발생했습니다. URL을 확인해 주세요.")
 
     # 구글 시트 데이터 로드 및 표시
     st.subheader("📋 실시간 기록 내역")
@@ -145,7 +151,7 @@ with col_right:
                 try:
                     h, m = map(int, str(last_sleep["end_time"]).split(":"))
                     latest_wake = time(h, m)
-                except:
+                except Exception:
                     pass
 
     st.markdown("##### ⚙️ 일정 기준 시간 설정")
