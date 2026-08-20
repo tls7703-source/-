@@ -7,7 +7,7 @@ from datetime import datetime, date, time, timedelta
 # 마미톡(MomiTalk) 스타일 감성 모바일 UI 테마 적용
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="마미톡 스타일 우리 아이 기록장",
+    page_title="우리 아이 육아 기록 & 맞춤 놀이",
     page_icon="🍼",
     layout="centered",
     initial_sidebar_state="collapsed"
@@ -26,11 +26,11 @@ st.markdown("""
     .baby-profile-card {
         background: linear-gradient(135deg, #FF8E9E 0%, #FFB6C1 100%);
         border-radius: 20px;
-        padding: 22px;
+        padding: 20px;
         color: white;
         text-align: center;
         box-shadow: 0 8px 20px rgba(255, 142, 158, 0.25);
-        margin-bottom: 20px;
+        margin-bottom: 15px;
     }
     .baby-profile-card h2 {
         color: white;
@@ -51,7 +51,7 @@ st.markdown("""
         background: white;
         border-radius: 16px;
         padding: 16px 12px;
-        margin-bottom: 20px;
+        margin-bottom: 18px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.04);
         text-align: center;
     }
@@ -77,7 +77,7 @@ st.markdown("""
     .timeline-card {
         background: white;
         border-radius: 16px;
-        padding: 16px;
+        padding: 15px 18px;
         margin-bottom: 12px;
         display: flex;
         align-items: center;
@@ -101,11 +101,19 @@ st.markdown("""
         margin-right: 14px;
     }
     
-    /* 폼 입력 버튼 */
+    /* 발달 놀이 카드 */
+    .play-box {
+        background: white;
+        border-radius: 16px;
+        padding: 18px;
+        margin-bottom: 14px;
+        border-left: 6px solid #FF8E9E;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+    
     div.stButton > button:first-child {
-        border-radius: 14px;
+        border-radius: 12px;
         font-weight: 600;
-        padding: 10px 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -154,54 +162,105 @@ def delete_record(created_at_val):
         return False
 
 # ---------------------------------------------------------
-# 2. 아기 프로필 계산
+# 2. 메인 화면 상단: 아기 생년월일 & 프로필 설정 영역
 # ---------------------------------------------------------
-with st.sidebar:
-    st.header("⚙️ 설정")
-    birth_date = st.date_input("생년월일", value=date(2025, 12, 1))
-    allergies = st.text_input("주의 음식 / 알레르기", placeholder="예: 계란, 우유, 복숭아")
+with st.expander("⚙️ 아기 프로필 설정 (생년월일 / 알레르기 수정)", expanded=False):
+    c_b1, c_b2 = st.columns(2)
+    with c_b1:
+        birth_date = st.date_input("아기 생년월일", value=date(2025, 12, 1), key="main_birth_date")
+    with c_b2:
+        allergies = st.text_input("알레르기 / 주의 음식", value="밀가루, 계란", placeholder="예: 계란, 우유", key="main_allergies")
 
 today = date.today()
 days_passed = (today - birth_date).days
-months_passed = days_passed // 30
+months_passed = max(0, days_passed // 30)
 
-# 상단 마미톡 스타일 프로필 배너
+# 마미톡 스타일 메인 프로필 배너
 st.markdown(f"""
 <div class="baby-profile-card">
     <h2>🍼 우리 아이</h2>
     <p><strong>생후 {days_passed}일차</strong> ({months_passed}개월)</p>
-    {f'<p style="font-size:13px; margin-top:6px; background:rgba(0,0,0,0.1); border-radius:10px; padding:3px 8px; display:inline-block;">⚠️ 알레르기: {allergies}</p>' if allergies else ''}
+    {f'<p style="font-size:13px; margin-top:6px; background:rgba(0,0,0,0.12); border-radius:10px; padding:3px 8px; display:inline-block;">⚠️ 알레르기 주의: {allergies}</p>' if allergies else ''}
 </div>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 3. 마미톡 퀵 탭 UI
+# 3. 월령별 맞춤 놀이 & 발달 가이드 DB
 # ---------------------------------------------------------
-tab_today, tab_input, tab_guide = st.tabs(["📋 오늘 타임라인", "✏️ 기록하기", "📖 권장 일과표"])
+PLAY_RECOMMENDATIONS = {
+    (0, 3): {
+        "title": "감각 발달 & 터미타임 단계 (0~3개월)",
+        "activities": [
+            ("👀 흑백 초점책 & 모빌 놀이", "시각 초점을 맞추는 연습을 도와주며, 좌우로 천천히 움직여 시선 추적을 유도합니다."),
+            ("🐢 안전한 터미타임 (1~3분)", "수유 직후를 피해 엎드려 놓아 목과 등 근육을 강화합니다."),
+            ("💆 베이비 오일 마사지", "팔다리를 가볍게 쓸어내리며 피부 접촉을 통한 정서적 안정감을 줍니다.")
+        ]
+    },
+    (4, 6): {
+        "title": "뒤집기 & 소근육 반응 단계 (4~6개월)",
+        "activities": [
+            ("🪞 거울 까꿍 놀이", "거울 속 자신을 보며 사회적 미소와 시각 인지 발달을 자극합니다."),
+            ("🔔 딸랑이 쥐고 흔들기", "양손으로 물건을 잡고 흔들며 인과관계(흔들면 소리 남)를 배웁니다."),
+            ("📖 촉감책 바스락 놀이", "부드러운 천, 바스락거리는 촉감책을 만지며 촉각 감각을 확장합니다.")
+        ]
+    },
+    (7, 9): {
+        "title": "되집기/기어가기 & 협응력 단계 (7~9개월)",
+        "activities": [
+            ("👏 짝짜꿍 & 잼잼 모방 놀이", "부모의 손동작을 따라 하며 모방 능력과 소근육 협응력을 키웁니다."),
+            ("🔍 손수건 속 장난감 찾기", "물건을 손수건으로 살짝 가려 대상영속성(보이지 않아도 존재함)을 익힙니다."),
+            ("🎾 볼풀공 잡고 굴리기", "배밀이나 기어가기를 유도하기 위해 좋아하는 공을 굴려줍니다.")
+        ]
+    },
+    (10, 12): {
+        "title": "잡고 서기 & 인지 확장 단계 (10~12개월)",
+        "activities": [
+            ("🧱 컵 쌓기 & 무너뜨리기", "컵을 높이 쌓아주고 아이가 손으로 무너뜨리며 쾌감과 원인-결과를 학습합니다."),
+            ("📦 상자 속에 물건 넣고 빼기", "작은 공이나 블록을 바구니에 넣고 쏟는 반복 놀이를 진행합니다."),
+            ("🧍 잡고 서서 발 떼기 연습", "소파나 안전 가드를 잡고 옆으로 걸어보는 크루징(Cruising)을 유도합니다.")
+        ]
+    },
+    (13, 24): {
+        "title": "걸음마 & 표현력 발달 단계 (13~24개월)",
+        "activities": [
+            ("🖍️ 안전 무독성 크레파스 낙서", "큰 종이 위에 자유롭게 선을 그으며 대소근육 조절력을 기릅니다."),
+            ("🧩 도형 맞추기 & 꼭지 퍼즐", "원, 세모, 네모 기본 모양 맞추기로 공간지각력을 키웁니다."),
+            ("⚽ 폭신한 공 주고받기", "발로 차거나 손으로 굴리며 신체 균형 감각을 발달시킵니다.")
+        ]
+    }
+}
 
-# 데이터 로드
+# 현재 월령에 맞는 추천 놀이 데이터 추출
+current_play_data = None
+for (s_m, e_m), p_data in PLAY_RECOMMENDATIONS.items():
+    if s_m <= months_passed <= e_m:
+        current_play_data = p_data
+        break
+if not current_play_data:
+    current_play_data = PLAY_RECOMMENDATIONS[(13, 24)]
+
+# ---------------------------------------------------------
+# 4. 탭 구성
+# ---------------------------------------------------------
+tab_today, tab_input, tab_play = st.tabs(["📋 오늘 타임라인", "✏️ 기록하기", "🧸 오늘의 추천 놀이"])
+
 df_records = load_records()
-today_str = today.strftime("%Y-%m-%d")
 
 with tab_today:
-    # 날짜 이동/선택
-    c_date, c_space = st.columns([1.5, 1])
-    with c_date:
-        selected_date = st.date_input("📅 날짜 선택", value=today, label_visibility="collapsed")
+    # 날짜 선택
+    selected_date = st.date_input("📅 날짜 선택", value=today, label_visibility="collapsed")
     target_date_str = selected_date.strftime("%Y-%m-%d")
 
-    # 오늘 통계 집계
     day_df = pd.DataFrame()
     if not df_records.empty:
         day_df = df_records[df_records["date"] == target_date_str].copy()
 
-    # 요약 통계 계산
+    # 요약 통계
     sleep_cnt = len(day_df[day_df["type"] == "수면"]) if not day_df.empty else 0
     meal_cnt = len(day_df[day_df["type"] == "이유식"]) if not day_df.empty else 0
     milk_cnt = len(day_df[day_df["type"] == "모유 수유"]) if not day_df.empty else 0
     diaper_cnt = len(day_df[day_df["type"].isin(["소변", "대변"])]) if not day_df.empty else 0
 
-    # 마미톡 스타일 통계 요약 박스
     st.markdown(f"""
     <div class="summary-container">
         <div class="summary-item">
@@ -223,10 +282,9 @@ with tab_today:
     </div>
     """, unsafe_allow_html=True)
 
-    # 타임라인 리스트 렌더링
+    # 타임라인 리스트
     if not day_df.empty:
         day_df = day_df.sort_values(by=["start_time"])
-        
         type_meta = {
             "수면": {"icon": "💤", "badge": "type-badge-sleep"},
             "이유식": {"icon": "🥣", "badge": "type-badge-meal"},
@@ -267,8 +325,6 @@ with tab_today:
 
 with tab_input:
     st.markdown("#### ✏️ 빠른 육아 기록")
-    
-    # 마미톡 감성의 직관적인 기록 폼
     with st.form("quick_record_form", clear_on_submit=True):
         record_type = st.radio(
             "기록 유형 선택",
@@ -284,7 +340,7 @@ with tab_input:
             has_end_time = st.checkbox("종료 시간 입력", value=(record_type == "수면"))
             rec_end_time = st.time_input("종료 시간", value=(datetime.now() + timedelta(minutes=40)).time())
                 
-        rec_memo = st.text_input("메모", placeholder="예: 140ml 완밥, 낮잠 잘 잠, 상태 양호 등")
+        rec_memo = st.text_input("메모", placeholder="예: 140ml 완밥, 낮잠 잘 잠 등")
         
         submitted = st.form_submit_button("기록 저장하기 ✨", type="primary", use_container_width=True)
         if submitted:
@@ -298,42 +354,19 @@ with tab_input:
             }
             with st.spinner("저장 중..."):
                 if add_record(new_entry):
-                    st.success("기록이 성공적으로 저장되었습니다!")
+                    st.success("기록이 저장되었습니다!")
                     st.rerun()
                 else:
                     st.error("저장 실패. 구글 시트 연결을 확인하세요.")
 
-with tab_guide:
-    st.markdown("#### 📖 권장 24시간 일과 패턴")
-    st.caption("우리 아이 기준 루틴 (5:51 기상 패턴)")
+with tab_play:
+    st.markdown(f"#### 🧸 {months_passed}개월 맞춤 발달 놀이")
+    st.caption(f"현재 단계: **{current_play_data['title']}**")
     
-    STANDARD_ROUTINE = [
-        ("05:51", "06:12", "첫 모유 수유", "🤱"),
-        ("06:12", "07:23", "아침 놀이 1", "🧸"),
-        ("07:23", "08:07", "낮잠 1", "💤"),
-        ("08:07", "08:30", "기상 후 놀이", "🧸"),
-        ("08:30", "09:00", "이유식 1차", "🥣"),
-        ("09:00", "10:30", "오전 놀이 2", "🧸"),
-        ("10:30", "11:10", "낮잠 2", "💤"),
-        ("11:10", "11:30", "놀이", "🧸"),
-        ("11:30", "12:00", "이유식 2차 (점심)", "🥣"),
-        ("12:00", "13:40", "놀이 및 산책", "🛝"),
-        ("13:40", "15:10", "낮잠 3", "💤"),
-        ("15:10", "15:30", "놀이", "🧸"),
-        ("15:30", "15:40", "모유 수유", "🤱"),
-        ("15:40", "16:30", "놀이", "🧸"),
-        ("16:30", "17:00", "오후 간식", "🍎"),
-        ("17:00", "18:00", "놀이", "🧸"),
-        ("18:00", "18:30", "이유식 3차 (저녁)", "🥣"),
-        ("18:30", "19:10", "놀이 및 정리", "🧸"),
-        ("19:10", "19:20", "목욕", "🛁"),
-        ("19:20", "19:30", "막수 (모유)", "🤱"),
-        ("19:30", "20:00", "수면 의식 / 재우기", "📖"),
-        ("20:00", "-", "밤잠 취침", "🌙")
-    ]
-    
-    routine_df = pd.DataFrame([
-        {"시작": s, "종료": e, "활동": f"{icon} {title}"}
-        for s, e, title, icon in STANDARD_ROUTINE
-    ])
-    st.dataframe(routine_df, use_container_width=True, hide_index=True)
+    for title, desc in current_play_data["activities"]:
+        st.markdown(f"""
+        <div class="play-box">
+            <div style="font-size:16px; font-weight:700; color:#333; margin-bottom:5px;">{title}</div>
+            <div style="font-size:14px; color:#666; line-height:1.5;">{desc}</div>
+        </div>
+        """, unsafe_allow_html=True)
