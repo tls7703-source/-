@@ -8,7 +8,7 @@ st.set_page_config(page_title="우리 아이 맞춤 스케줄러 & 실시간 기
 # ---------------------------------------------------------
 # 1. 구글 시트 웹앱 API 연동 (1단계에서 복사한 URL 입력)
 # ---------------------------------------------------------
-API_URL = "https://script.google.com/macros/s/AKfycbxZnQwbsXxAa63Wyz1XFyNYTb0n7WOA5kMZQjT_9SMVbA1_Y-qitH3VOKqq5TPWA0Pugw/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbx75ej3jJb6jParLXKX9s9MiyFPtHuTHrqVhOqaAtfg7LEu5NYzOEsXSmlHRjkRiWQJBg/exec"
 
 def load_records():
     """구글 시트에서 실시간 데이터 읽어오기"""
