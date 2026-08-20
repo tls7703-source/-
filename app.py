@@ -369,19 +369,26 @@ with tab_today:
 
 with tab_input:
     st.markdown("#### ✏️ 빠른 육아 기록")
+    
+    # 1. 폼 외부에서 기록 유형을 먼저 선택 (유형 변경 시 체크박스 디폴트가 즉시 반응)
+    record_type = st.radio(
+        "기록 유형 선택",
+        ["수면", "이유식", "모유 수유", "소변", "대변"],
+        horizontal=True,
+        key="selected_record_type"
+    )
+    
+    # 수면일 때만 True, 나머지는 False로 디폴트 지정
+    default_has_end_time = (record_type == "수면")
+    
     with st.form("quick_record_form", clear_on_submit=True):
-        record_type = st.radio(
-            "기록 유형 선택",
-            ["수면", "이유식", "모유 수유", "소변", "대변"],
-            horizontal=True
-        )
-        
         c1, c2 = st.columns(2)
         with c1:
             rec_date = st.date_input("시작 날짜", value=today)
             rec_start_time = st.time_input("시작 시간", value=time(19, 0) if record_type == "수면" else datetime.now().time())
         with c2:
-            has_end_time = st.checkbox("종료 시간 입력", value=(record_type == "수면"))
+            # 수면일 때만 체크박스가 기본 체크(True)되고, 이유식/모유/소변/대변은 체크 해제(False)됨
+            has_end_time = st.checkbox("종료 시간 입력", value=default_has_end_time, key=f"end_time_chk_{record_type}")
             rec_end_time = st.time_input("종료 시간", value=time(6, 0) if record_type == "수면" else (datetime.now() + timedelta(minutes=40)).time())
 
         is_next_day = False
@@ -411,7 +418,6 @@ with tab_input:
                     st.error("저장 실패. 구글 시트 연결을 확인하세요.")
 
 with tab_play:
-    # 0~72개월(만 6세) 자동 매칭
     matched_plays = []
     current_range_str = "영유아"
     for (s_m, e_m), plays in EXTENDED_PLAY_DB.items():
@@ -429,7 +435,6 @@ with tab_play:
     with c_p2:
         shuffle_btn = st.button("🎲 다른 놀이", use_container_width=True)
 
-    # 셔플 버튼 누를 때마다 랜덤하게 3가지 놀이 추천
     if "play_seed" not in st.session_state or shuffle_btn:
         st.session_state.play_seed = random.randint(1, 1000)
 
@@ -445,7 +450,6 @@ with tab_play:
         </div>
         """, unsafe_allow_html=True)
 
-    # 외부 놀이 사이트/포털 바로가기 링크 (자동 업데이트 소스)
     with st.expander("🌐 전문가 육아/놀이 백과 바로가기 (차이의 놀이 / 아이사랑)"):
         st.markdown(f"""
         - 🎈 **[차이의 놀이 (Havruta Play)](https://www.chaisplay.com):** 월령별 맞춤 놀이 팁 및 교구 놀이 백과
