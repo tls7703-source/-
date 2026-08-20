@@ -279,13 +279,37 @@ with tab_today:
     selected_date = st.date_input("📅 날짜 선택", value=today, label_visibility="collapsed")
     target_date_str = selected_date.strftime("%Y-%m-%d")
 
-    # 선택 날짜에 해당하는 기록 추출
-    # 1) 오늘 시작한 기록
-    # 2) 전날 밤 시작해서 오늘(target_date) 아침에 깬 밤잠 기록
-    day_df = pd.DataFrame()
+    # [핵심 로직] 각 기록의 실제 종료 날짜 자동 계산 및 타깃 날짜 매칭
+    def get_record_effective_dates(row):
+        start_d = str(row["date"]).strip()
+        end_d = str(row.get("end_date", "-")).strip()
+        st_t = str(row.get("start_time", "-")).strip()
+        end_t = str(row.get("end_time", "-")).strip()
+        
+        # 만약 수면이고 end_date가 명시되지 않았거나 '-'인 경우에도,
+        # start_time > end_time 이면 자동으로 다음날로 판별 (예: 19:00 시작, 06:00 종료)
+        if row["type"] == "수면" and st_t != "-" and end_t != "-":
+            try:
+                if end_d in ["-", "", "None", "nan"] or end_d == start_d:
+                    if st_t > end_t: # 19:00 > 06:00 -> 자정 넘김
+                        s_date_obj = datetime.strptime(start_d, "%Y-%m-%d").date()
+                        end_d = (s_date_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+            except:
+                pass
+        return start_d, end_d
+
+    day_rows = []
     if not df_records.empty:
-        mask = (df_records["date"] == target_date_str) | (df_records["end_date"] == target_date_str)
-        day_df = df_records[mask].copy()
+        for _, row in df_records.iterrows():
+            st_d, ed_d = get_record_effective_dates(row)
+            # 오늘 시작한 기록이거나, 전날 시작해서 오늘(target_date) 끝난 밤잠 기록인 경우 포함
+            if st_d == target_date_str or ed_d == target_date_str:
+                r_dict = row.to_dict()
+                r_dict["effective_start_date"] = st_d
+                r_dict["effective_end_date"] = ed_d
+                day_rows.append(r_dict)
+
+    day_df = pd.DataFrame(day_rows)
 
     # 요약 통계 집계
     sleep_cnt = len(day_df[day_df["type"] == "수면"]) if not day_df.empty else 0
@@ -315,13 +339,13 @@ with tab_today:
     """, unsafe_allow_html=True)
 
     if not day_df.empty:
-        # 시간순 정렬 로직 (전날 시작해 오늘 아침 깬 밤잠은 아침 기상 시각 위치에 배치)
+        # 시간순 정렬 (전날 시작해서 오늘 아침 깬 밤잠은 아침 기상 시각 위치에 배치)
         def make_sort_key(r):
-            if r["end_date"] == target_date_str and r["date"] != target_date_str:
-                # 전날 밤잠이 오늘 아침에 끝난 경우 -> 오늘 기상 시간 기준 정렬
+            if r["effective_end_date"] == target_date_str and r["effective_start_date"] != target_date_str:
+                # 전날 밤잠이 오늘 끝난 경우 -> 오늘 기상 시간 기준
                 return f"{target_date_str} {r['end_time']}"
             t_str = r["start_time"] if r["start_time"] != "-" else "00:00"
-            return f"{r['date']} {t_str}"
+            return f"{r['effective_start_date']} {t_str}"
             
         day_df["sort_key"] = day_df.apply(make_sort_key, axis=1)
         day_df = day_df.sort_values(by="sort_key", ascending=True)
@@ -338,14 +362,15 @@ with tab_today:
             meta = type_meta.get(row['type'], {"icon": "📝", "badge": "type-badge-sleep"})
             start_disp = row['start_time']
             end_disp = row['end_time']
-            is_overnight = (row['end_date'] != "-" and row['end_date'] != row['date'])
+            
+            is_overnight = (row['effective_end_date'] != "-" and row['effective_end_date'] != row['effective_start_date'])
             
             if is_overnight:
-                if row['date'] == target_date_str:
-                    # 잠든 날 밤 타임라인에 표시될 때
+                if row['effective_start_date'] == target_date_str:
+                    # 19일 화면에서 볼 때
                     time_text = f"{start_disp} ~ 익일 {end_disp} 취침 (밤잠 🌙)"
                 else:
-                    # 일어난 다음 날 아침 타임라인에 표시될 때
+                    # 20일 화면에서 볼 때
                     time_text = f"전일 {start_disp} ~ {end_disp} 기상 (밤잠 🌙)"
             else:
                 time_text = start_disp
@@ -379,7 +404,6 @@ with tab_today:
 with tab_input:
     st.markdown("#### ✏️ 빠른 육아 기록")
     
-    # 1. 상단 기록 유형 라디오 선택
     record_type = st.radio(
         "기록 유형 선택",
         ["수면", "이유식", "모유 수유", "소변", "대변"],
@@ -395,7 +419,6 @@ with tab_input:
             rec_date = st.date_input("시작 날짜", value=today)
             rec_start_time = st.time_input("시작(발생) 시간", value=time(19, 0) if is_sleep_type else datetime.now().time())
         with c2:
-            # 수면 유형일 때만 종료시간 체크박스를 보여주고 기본 체크(True)
             if is_sleep_type:
                 has_end_time = st.checkbox("종료 시간 입력", value=True, key="chk_sleep_end")
                 rec_end_time = st.time_input("종료 시간", value=time(6, 0))
@@ -403,7 +426,6 @@ with tab_input:
                 has_end_time = False
                 rec_end_time = None
 
-        # 수면 유형일 때만 다음날 넘김 체크박스를 보여주고, 기본값은 무조건 False (체크 안 됨)
         is_next_day = False
         if is_sleep_type and has_end_time:
             is_next_day = st.checkbox("🌙 다음 날 아침에 깸 (밤잠/날짜 넘어감)", value=False, key="chk_sleep_next_day")
@@ -412,7 +434,10 @@ with tab_input:
         
         submitted = st.form_submit_button("기록 저장하기 ✨", type="primary", use_container_width=True)
         if submitted:
-            calc_end_date = (rec_date + timedelta(days=1)) if (is_sleep_type and is_next_day) else rec_date
+            # 시작 시간(19:00) > 종료 시간(06:00) 이거나 사용자가 체크박스를 누른 경우 둘 다 다음날로 자동 보정
+            auto_cross_midnight = (is_sleep_type and has_end_time and rec_start_time > rec_end_time)
+            calc_end_date = (rec_date + timedelta(days=1)) if (is_next_day or auto_cross_midnight) else rec_date
+            
             new_entry = {
                 "date": rec_date.strftime("%Y-%m-%d"),
                 "type": record_type,
