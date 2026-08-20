@@ -6,18 +6,26 @@ from datetime import datetime, date, time, timedelta
 st.set_page_config(page_title="우리 아이 맞춤 스케줄러 & 실시간 기록장", page_icon="👶", layout="wide")
 
 # ---------------------------------------------------------
-# 1. 구글 시트 웹앱 API 연동 (1단계에서 복사한 URL 입력)
+# 1. 구글 시트 웹앱 API 연동
 # ---------------------------------------------------------
 API_URL = "https://script.google.com/macros/s/AKfycby3sVLC2WBVKgNWTmeSnuWa7G_P04FLFPi7PEic65Sg6xRy5YSS4P9SlyF6Nvq1cNXnzw/exec"
 
 def load_records():
-    """구글 시트에서 실시간 데이터 읽어오기"""
+    """구글 시트에서 실시간 데이터 읽어오기 및 정제"""
     try:
         res = requests.get(API_URL, timeout=5)
         if res.status_code == 200:
             data = res.json()
             if data:
-                return pd.DataFrame(data)
+                df = pd.DataFrame(data)
+                for col in ["date", "type", "start_time", "end_time", "memo", "created_at"]:
+                    if col not in df.columns:
+                        df[col] = "-"
+                df["date"] = df["date"].astype(str).str.slice(0, 10)
+                df["start_time"] = df["start_time"].astype(str).str.strip()
+                df["end_time"] = df["end_time"].astype(str).str.strip()
+                df["created_at"] = df["created_at"].astype(str).str.strip()
+                return df
         return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "memo", "created_at"])
     except Exception:
         return pd.DataFrame(columns=["date", "type", "start_time", "end_time", "memo", "created_at"])
@@ -25,7 +33,17 @@ def load_records():
 def add_record(record_dict):
     """구글 시트에 새 기록 전송"""
     try:
+        record_dict["action"] = "add"
         res = requests.post(API_URL, json=record_dict, timeout=5)
+        return res.status_code == 200
+    except Exception:
+        return False
+
+def delete_record(created_at_val):
+    """구글 시트에서 특정 기록 삭제"""
+    try:
+        payload = {"action": "delete", "created_at": created_at_val}
+        res = requests.post(API_URL, json=payload, timeout=5)
         return res.status_code == 200
     except Exception:
         return False
@@ -60,7 +78,7 @@ for (start_m, end_m), plays in play_database.items():
         current_plays = plays
         break
 
-# 기본 24시간 상세 일과 템플릿
+# 기본 24시간 상세 일과 템플릿 (기상 05:51 기준)
 DEFAULT_PATTERN = [
     {"offset": 0, "duration": 21, "title": "첫 모유 수유", "type": "모유 수유", "icon": "🤱"},
     {"offset": 21, "duration": 71, "title": "아침 놀이 1", "type": "놀이", "icon": "🧸", "is_play": True},
@@ -87,12 +105,12 @@ DEFAULT_PATTERN = [
 ]
 
 # ---------------------------------------------------------
-# 3. 화면 레이아웃 (좌측: 기록장, 우측: 동적 타임라인)
+# 3. 화면 레이아웃
 # ---------------------------------------------------------
-col_left, col_right = st.columns([1, 1.2], gap="large")
+col_left, col_right = st.columns([1.1, 1.2], gap="large")
 
 # =========================================================
-# 좌측: 실시간 기록 및 데이터 관리
+# 좌측: 실시간 기록 & 삭제 관리
 # =========================================================
 with col_left:
     st.header("📝 실시간 공유 육아 기록")
@@ -113,14 +131,14 @@ with col_left:
         
         if submitted:
             new_entry = {
-                "date": str(rec_date),
+                "date": rec_date.strftime("%Y-%m-%d"),
                 "type": record_type,
                 "start_time": rec_start_time.strftime("%H:%M"),
                 "end_time": rec_end_time.strftime("%H:%M") if has_end_time else "-",
-                "memo": rec_memo,
+                "memo": rec_memo if rec_memo else "-",
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            with st.spinner("구글 시트에 저장 중..."):
+            with st.spinner("구글 시트에 동기화 중..."):
                 success = add_record(new_entry)
             if success:
                 st.success("구글 시트에 저장 완료!")
@@ -128,11 +146,28 @@ with col_left:
             else:
                 st.error("저장 중 오류가 발생했습니다. URL을 확인해 주세요.")
 
-    # 구글 시트 데이터 로드 및 표시
-    st.subheader("📋 실시간 기록 내역")
+    # 구글 시트 데이터 로드 및 삭제 UI
+    st.subheader("📋 최근 기록 및 삭제")
     df_records = load_records()
+    
     if not df_records.empty:
-        st.dataframe(df_records[["date", "type", "start_time", "end_time", "memo"]].tail(10), use_container_width=True)
+        # 최근 등록된 역순으로 상위 5개 표시 및 삭제 버튼 제공
+        recent_df = df_records.tail(8).iloc[::-1]
+        
+        for idx, row in recent_df.iterrows():
+            c_info, c_del = st.columns([4, 1])
+            with c_info:
+                end_str = f" ~ {row['end_time']}" if row['end_time'] != '-' else ""
+                st.markdown(f"**[{row['type']}]** {row['date']} {row['start_time']}{end_str} | `{row['memo']}`")
+            with c_del:
+                if st.button("🗑️ 삭제", key=f"del_{row['created_at']}_{idx}", use_container_width=True):
+                    with st.spinner("삭제 중..."):
+                        if delete_record(row['created_at']):
+                            st.success("삭제되었습니다!")
+                            st.rerun()
+                        else:
+                            st.error("삭제 실패")
+            st.write("<div style='margin-bottom: -8px;'></div>", unsafe_allow_html=True)
     else:
         st.info("기록이 없습니다. 첫 기록을 등록해 보세요!")
 
@@ -143,25 +178,38 @@ with col_right:
     st.header("⏰ 맞춤 실시간 스케줄표")
     
     latest_wake = time(5, 51)
+    found_sleep_time = None
+    
     if not df_records.empty:
         sleep_records = df_records[df_records["type"] == "수면"]
         if not sleep_records.empty:
             last_sleep = sleep_records.iloc[-1]
-            if last_sleep["end_time"] != "-":
-                try:
-                    h, m = map(int, str(last_sleep["end_time"]).split(":"))
+            raw_time = str(last_sleep["end_time"]).strip()
+            if raw_time in ["-", "", "None", "nan"]:
+                raw_time = str(last_sleep["start_time"]).strip()
+                
+            try:
+                t_parts = raw_time.split(":")
+                if len(t_parts) >= 2:
+                    h, m = int(t_parts[0]), int(t_parts[1])
                     latest_wake = time(h, m)
-                except Exception:
-                    pass
+                    found_sleep_time = f"{h:02d}:{m:02d}"
+            except Exception:
+                pass
 
     st.markdown("##### ⚙️ 일정 기준 시간 설정")
     use_auto_sync = st.checkbox("구글 시트의 최근 수면/기상 기록 자동 연동", value=True)
     
-    base_wake_time = st.time_input("오늘 시작(기상) 시간", value=latest_wake if use_auto_sync else time(5, 51))
+    if use_auto_sync and found_sleep_time:
+        st.info(f"🔄 최근 수면 기록({found_sleep_time})을 기준으로 전체 일정이 자동 조정되었습니다.")
+        base_wake_time = latest_wake
+    else:
+        base_wake_time = st.time_input("오늘 시작(기상) 시간 직접 지정", value=time(5, 51))
+        
     base_dt = datetime.combine(today, base_wake_time)
     
     st.write("---")
-    st.subheader("📅 오늘 자동 재조정된 타임라인")
+    st.subheader(f"📅 오늘 자동 재조정된 타임라인 (기준: {base_wake_time.strftime('%H:%M')})")
     
     play_idx = 0
     for idx, item in enumerate(DEFAULT_PATTERN):
